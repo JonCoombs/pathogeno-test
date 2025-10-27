@@ -1,0 +1,24 @@
+---
+title: "Jonathan Coombs - Bio 478 Labs"
+author: "Jonathan Coombs"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc_float: true
+    embed-resources: true
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+![Labeled image of a frog embryo model](emb_lab.jpg){width="100"}
+
+## About Me
+
+I'm a senior biology and computer science major at UMass, and am currently taking Bio 478.
+
+## Lab 7
+
+[Lab 7](Coombs_Lab7.html)
