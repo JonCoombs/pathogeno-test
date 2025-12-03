@@ -1,0 +1,286 @@
+---
+title: "Lab 13"
+author: "Jonathan Coombs"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc_float: true
+    embed-resources: true
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(DT)
+library(viridis)
+library(janitor)
+library(plotly)
+library(respirometry)
+library(scales)
+library(vegan)
+```
+
+## Import and Data Prep
+
+```{r}
+# Define neon_mags_soil
+
+NEON_MAGs_prelim <- read_tsv("/work/pi_bio678_umass_edu/data_NEON/exported_img_bins_Gs0166454_NEON.tsv") |>
+
+  clean_names() |> 
+  
+  # Add a new column community corresponding to different communities names in the genome_name
+  mutate(community = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater sediment microbial communitie",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater biofilm microbial communities",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater microbial communities",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil microbial communities",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Create a column type that is either Freshwater or Soil
+  mutate(type = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Get rid of the communities strings
+  mutate_at("genome_name", str_replace, "Freshwater sediment microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater biofilm microbial communities from", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Soil microbial communities from ", "") |> 
+
+  # separate site from sample name 
+  separate(genome_name, c("site","sample_name"), " - ") |>   
+  
+  # Deal with these unknow fields in the sample name by creating a new column and removing them from the sample name
+  mutate(sample_unknown = case_when(
+    str_detect(sample_name, ".SS.") ~ "SS",
+    str_detect(sample_name, ".C0.") ~ "C0",
+    str_detect(sample_name, ".C1.") ~ "C1",
+    str_detect(sample_name, ".C2.") ~ "C2",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  mutate_at("sample_name", str_replace, ".SS", "") |> 
+  mutate_at("sample_name", str_replace, ".C0", "") |> 
+  mutate_at("sample_name", str_replace, ".C1", "") |> 
+  mutate_at("sample_name", str_replace, ".C2", "") |> 
+  
+
+  # Get rid of the the common strings at the end of sample names
+  mutate_at("sample_name", str_replace, "-GEN-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA2", "") |>  
+  mutate_at("sample_name", str_replace, ".DNA-DNA1", "") |>
+  mutate_at("sample_name", str_replace, "_v2", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 2\\)", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 3\\)", "") |>
+  
+# Separate out the taxonomy groups
+  separate(gtdb_taxonomy_lineage, c("domain", "phylum", "class", "order", "family", "genus"), "; ", remove = FALSE)
+
+NEON_MAGs_soil <- NEON_MAGs_prelim |>
+  filter(type == "Soil") |>
+  # separate the Sample Name into Site ID and plot info
+  separate(sample_name, c("site_ID","subplot.layer.date"), "_", remove = FALSE,) |> 
+  # some sample names have 3 fields while others have a fourth field for the quadrant. This code create a field for the quadrant when present and adds na for samples from combined cores.
+  extract(
+    subplot.layer.date,
+    into = c("subplot", "layer", "quadrant", "date"),
+    regex = "^([^-]+)-([^-]+)(?:-([^-]+))?-([^-]+)$",
+    remove = FALSE
+  ) |>
+  mutate(quadrant = na_if(quadrant, "")) |>
+  select(-subplot.layer.date)
+
+# Define genome_groups_all_means
+
+soilChem <- readRDS("/work/pi_bio678_umass_edu/data_NEON/soilChem.rds")
+
+## This is the path for Jeff's personal computer
+# soilChem <- readRDS("../data/NEON_metadata/soilChem.rds")
+
+soilChem$sls_metagenomicsPooling[5,'genomicsSampleID']
+
+soilChem$sls_metagenomicsPooling[5,'collectDate']
+
+soilChem$sls_metagenomicsPooling$genomicsPooledIDList[5]
+
+# View(soilChem$sls_soilChemistry # No soil chemistry data for HARV
+soilChem$sls_soilMoisture |> 
+  filter(sampleID == "HARV_013-O-39-20230704") |> 
+  select(sampleID, soilMoisture)
+
+# split up the pooled list into new columns
+genomicSamples <- soilChem$sls_metagenomicsPooling |>
+  tidyr::separate(genomicsPooledIDList, into=c("first","second","third"),sep="\\|",fill="right") |>
+  dplyr::select(genomicsSampleID,first,second,third)
+
+genSampleExample <- genomicSamples |> 
+  tidyr::pivot_longer(cols=c("first","second","third"),values_to = "sampleID") |>
+  dplyr::select(sampleID,genomicsSampleID) |>
+  drop_na()
+
+chemEx <- soilChem$sls_soilMoisture |>
+  dplyr::select(sampleID,soilMoisture)
+
+## now combine the tables 
+combinedTab <- left_join(genSampleExample,chemEx, by = "sampleID") |> drop_na()
+
+soilpH_Example <- soilChem$sls_soilpH %>%
+  dplyr::filter(sampleID %in% combinedTab$sampleID) %>%
+  dplyr::select(sampleID,soilInWaterpH,soilInCaClpH)
+
+# now join with the existing table
+combinedTab_pH <- left_join(combinedTab,soilpH_Example, by = "sampleID")
+
+genome_groups_all_mean <- combinedTab_pH %>%
+  group_by(genomicsSampleID) %>%
+  {left_join(
+    summarize_at(.,vars("soilMoisture"), mean),
+    summarize_at(.,vars("soilInWaterpH","soilInCaClpH"), mean_pH)
+  )}
+```
+
+```{r}
+# Combine data frames, save
+
+tmp <- genome_groups_all_mean |> mutate(sample_name = substr(genomicsSampleID, 1, nchar(genomicsSampleID) - 5))
+
+NEON_soilMAGs_soilChem <- left_join(tmp, NEON_MAGs_soil)
+
+write.csv(NEON_soilMAGs_soilChem,file = "NEON_soilMAGs_soilChem.csv")
+```
+
+## Exercises
+
+### ChatGPT Prompt
+
+I attached a .csv file that contains metagenome-assembled genomes and soil data based on the site where these samples were taken. Please look at the .csv file and identify the columns and data types present, then write comprehensive R code that performs taxonomic profiling to find the relative abundance of each phylum across sampling site.
+
+### Generated Code
+
+```{r, fig.width=10, fig.height=10}
+# Load data
+df <- NEON_soilMAGs_soilChem
+
+# Ensure taxonomy and site columns exist
+df_clean <- df %>%
+  filter(!is.na(phylum), !is.na(site_ID))
+
+# Use gene_count as abundance proxy
+df_abund <- df_clean %>%
+  group_by(site_ID, phylum) %>%
+  summarize(total_genes = sum(gene_count, na.rm = TRUE), .groups = "drop")
+
+# Compute relative abundance within each site
+df_abund <- df_abund %>%
+  group_by(site_ID) %>%
+  mutate(rel_abund = total_genes / sum(total_genes)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_abund, aes(x = site_ID, y = rel_abund, fill = phylum)) +
+  geom_col(position = "stack") +
+  labs(
+    title = "Relative Abundance of Phyla by Gene Count Across Sampling Sites",
+    x = "Site ID",
+    y = "Relative Abundance"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+This graph shows the relative abundance of each phylum per site. From this graph, we can see that each site has a different relative abundance of each phylum, as well as that there are general patterns of phyla common at each site.
+
+```{r}
+# Filter out missing taxonomy or site data
+df_clean <- NEON_soilMAGs_soilChem %>%
+  filter(!is.na(phylum), !is.na(site_ID))
+
+# Create a site × phylum gene_count abundance table
+abund_table <- df_clean %>%
+  group_by(site_ID, phylum) %>%
+  summarize(total_genes = sum(gene_count, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = phylum, values_from = total_genes, values_fill = 0)
+
+# Save site_ID as rownames
+abund_mat <- abund_table %>%
+  as.data.frame()
+
+rownames(abund_mat) <- abund_mat$site_ID
+abund_mat$site_ID <- NULL
+
+# Shannon
+shannon <- diversity(abund_mat, index = "shannon")
+
+# Simpson (1 − D)
+simpson <- diversity(abund_mat, index = "simpson")
+
+# Species richness (count of nonzero phyla)
+richness <- specnumber(abund_mat)
+
+alpha_df <- data.frame(
+  site_ID = rownames(abund_mat),
+  Shannon = shannon,
+  Simpson = simpson,
+  Richness = richness
+)
+
+alpha_df
+```
+
+This table shows alpha diversity metrics, specifically Shannon, Simpson, and richness. Alpha diversity measures the within-sample diversity based on evenness and richness. Shannon measures both evenness and richness, with a higher number corresponding to a higher alpha diversity. Simpson also measures both metrics on a 0 to 1 scale, with a number closer to 1 representing lower diversity. A simple richness calculation (number of phyla present) is also provided.
+
+```{r}
+bray <- vegdist(abund_mat, method = "bray")
+bray
+```
+
+This is a beta-diversity calculation, which is a pairwise metric of the ratio of diversity between two sites. This specific calculation uses Bray-Curtis dissimilarity, which calculates the ratio of dissimilar samples to the total abundance, with a higher value corresponding to higher dissimilarity (i.e. higher relative diversity between sites).
+
+```{r}
+pcoa_res <- cmdscale(bray, eig = TRUE, k = 2)
+
+pcoa_df <- data.frame(
+  site_ID = rownames(abund_mat),
+  PC1 = pcoa_res$points[,1],
+  PC2 = pcoa_res$points[,2]
+)
+
+ggplot(pcoa_df, aes(x = PC1, y = PC2, label = site_ID)) +
+  geom_point(size = 3) +
+  geom_text(vjust = -0.5, size = 3) +
+  theme_bw() +
+  labs(title = "PCoA (Bray–Curtis)")
+```
+
+This is a PCoA graph, showing general local and global distances between different sites, using Bray-Curtis beta diversity measurements as distance and preserving each pairwise distance as much as possible in a 2D space. This graph lets us generally see which sites are clustered near each other and which ones are similar and dissimilar, and is a clear visual metric to interpret the Bray-Curtis beta diversity table.
+
+```{r}
+set.seed(123)
+nmds <- metaMDS(abund_mat, distance = "bray", k = 2, trymax = 200)
+
+nmds_df <- data.frame(
+  site_ID = rownames(abund_mat),
+  NMDS1 = nmds$points[,1],
+  NMDS2 = nmds$points[,2]
+)
+
+ggplot(nmds_df, aes(x = NMDS1, y = NMDS2, label = site_ID)) +
+  geom_point(size = 3) +
+  geom_text(vjust = -0.5, size = 3) +
+  theme_bw() +
+  labs(title = "NMDS (Bray–Curtis)")
+```
+
+This is an NMDS plot, which is another dimensionality reduction method that can be used alongside a distance metric (still Bray-Curtis) to visualize local and global relationships between sites. In this case, NMDS focuses on preserving rank-order of distances rather than just keeping pairwise distances as close to accurate as possible, which is better at graphing non-linear and complex relationships.

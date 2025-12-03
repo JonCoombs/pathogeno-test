@@ -1,0 +1,373 @@
+---
+title: "Lab S6"
+author: "Jonathan Coombs"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc_float: true
+    embed-resources: true
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(DT)
+library(viridis)
+library(janitor)
+library(plotly)
+library(respirometry)
+```
+
+## Exercise 1
+
+```{r}
+# Define neon_mags_soil
+
+NEON_MAGs_prelim <- read_tsv("/work/pi_bio678_umass_edu/data_NEON/exported_img_bins_Gs0166454_NEON.tsv") |>
+
+  clean_names() |> 
+  
+  # Add a new column community corresponding to different communities names in the genome_name
+  mutate(community = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater sediment microbial communitie",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater biofilm microbial communities",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater microbial communities",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil microbial communities",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Create a column type that is either Freshwater or Soil
+  mutate(type = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Get rid of the communities strings
+  mutate_at("genome_name", str_replace, "Freshwater sediment microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater biofilm microbial communities from", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Soil microbial communities from ", "") |> 
+
+  # separate site from sample name 
+  separate(genome_name, c("site","sample_name"), " - ") |>   
+  
+  # Deal with these unknow fields in the sample name by creating a new column and removing them from the sample name
+  mutate(sample_unknown = case_when(
+    str_detect(sample_name, ".SS.") ~ "SS",
+    str_detect(sample_name, ".C0.") ~ "C0",
+    str_detect(sample_name, ".C1.") ~ "C1",
+    str_detect(sample_name, ".C2.") ~ "C2",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  mutate_at("sample_name", str_replace, ".SS", "") |> 
+  mutate_at("sample_name", str_replace, ".C0", "") |> 
+  mutate_at("sample_name", str_replace, ".C1", "") |> 
+  mutate_at("sample_name", str_replace, ".C2", "") |> 
+  
+
+  # Get rid of the the common strings at the end of sample names
+  mutate_at("sample_name", str_replace, "-GEN-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA2", "") |>  
+  mutate_at("sample_name", str_replace, ".DNA-DNA1", "") |>
+  mutate_at("sample_name", str_replace, "_v2", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 2\\)", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 3\\)", "") |>
+  
+# Separate out the taxonomy groups
+  separate(gtdb_taxonomy_lineage, c("domain", "phylum", "class", "order", "family", "genus"), "; ", remove = FALSE)
+
+NEON_MAGs_soil <- NEON_MAGs_prelim |>
+  filter(type == "Soil") |>
+  # separate the Sample Name into Site ID and plot info
+  separate(sample_name, c("site_ID","subplot.layer.date"), "_", remove = FALSE,) |> 
+  # some sample names have 3 fields while others have a fourth field for the quadrant. This code create a field for the quadrant when present and adds na for samples from combined cores.
+  extract(
+    subplot.layer.date,
+    into = c("subplot", "layer", "quadrant", "date"),
+    regex = "^([^-]+)-([^-]+)(?:-([^-]+))?-([^-]+)$",
+    remove = FALSE
+  ) |>
+  mutate(quadrant = na_if(quadrant, "")) |>
+  select(-subplot.layer.date)
+
+# Define genome_groups_all_means
+
+soilChem <- readRDS("/work/pi_bio678_umass_edu/data_NEON/soilChem.rds")
+
+## This is the path for Jeff's personal computer
+# soilChem <- readRDS("../data/NEON_metadata/soilChem.rds")
+
+soilChem$sls_metagenomicsPooling[5,'genomicsSampleID']
+
+soilChem$sls_metagenomicsPooling[5,'collectDate']
+
+soilChem$sls_metagenomicsPooling$genomicsPooledIDList[5]
+
+# View(soilChem$sls_soilChemistry # No soil chemistry data for HARV
+soilChem$sls_soilMoisture |> 
+  filter(sampleID == "HARV_013-O-39-20230704") |> 
+  select(sampleID, soilMoisture)
+
+# split up the pooled list into new columns
+genomicSamples <- soilChem$sls_metagenomicsPooling |>
+  tidyr::separate(genomicsPooledIDList, into=c("first","second","third"),sep="\\|",fill="right") |>
+  dplyr::select(genomicsSampleID,first,second,third)
+
+genSampleExample <- genomicSamples |> 
+  tidyr::pivot_longer(cols=c("first","second","third"),values_to = "sampleID") |>
+  dplyr::select(sampleID,genomicsSampleID) |>
+  drop_na()
+
+chemEx <- soilChem$sls_soilMoisture |>
+  dplyr::select(sampleID,soilMoisture)
+
+## now combine the tables 
+combinedTab <- left_join(genSampleExample,chemEx, by = "sampleID") |> drop_na()
+
+soilpH_Example <- soilChem$sls_soilpH %>%
+  dplyr::filter(sampleID %in% combinedTab$sampleID) %>%
+  dplyr::select(sampleID,soilInWaterpH,soilInCaClpH)
+
+# now join with the existing table
+combinedTab_pH <- left_join(combinedTab,soilpH_Example, by = "sampleID")
+
+genome_groups_all_mean <- combinedTab_pH %>%
+  group_by(genomicsSampleID) %>%
+  {left_join(
+    summarize_at(.,vars("soilMoisture"), mean),
+    summarize_at(.,vars("soilInWaterpH","soilInCaClpH"), mean_pH)
+  )}
+```
+
+```{r}
+# Combine data frames, save
+
+tmp <- genome_groups_all_mean |> mutate(sample_name = substr(genomicsSampleID, 1, nchar(genomicsSampleID) - 5))
+
+NEON_soilMAGs_soilChem <- left_join(tmp, NEON_MAGs_soil)
+
+write.csv(NEON_soilMAGs_soilChem,file = "NEON_soilMAGs_soilChem.csv")
+```
+
+## Exercise 2
+
+ChatGPT Prompt:
+
+This is a CSV file of metagenome assembled genomes, including information about the site and date where the sample was taken (such as soil PH and moisture) as well as genomics information about the specific bin (such as contamination, completeness, and number of bases). What type of analysis can I do with this dataset in R?
+
+ChatGPT Response:
+
+Below is a practical overview of the types of analyses you can do in R with a dataset describing metagenome-assembled genomes (MAGs) along with environmental metadata (soil pH, moisture, sampling date, site, etc.) and genome-quality metrics (completeness, contamination, N50, number of bases, etc.).
+I’ll group them into ecological, statistical, genomic, and visualization-focused analyses.
+
+✅ 1. Environmental Drivers of MAG Occurrence / Abundance
+If your dataset includes presence/absence or abundance of MAGs across sites, you can examine which environmental variables predict MAG distribution.
+Possible analyses in R:
+
+Ordination analyses
+
+PCA, PCoA (vegan::rda, vegan::capscale)
+NMDS (vegan::metaMDS)
+
+Environmental fitting
+
+envfit() to project pH, moisture, etc. onto ordination space.
+Distance-based redundancy analysis (db-RDA)
+To test how much environmental variation explains MAG composition.
+
+Questions you can answer:
+
+Does pH predict which MAGs appear in a sample?
+Is moisture correlated with community structure?
+Are samples collected at different dates environmentally or genomically distinct?
+
+✅ 2. Genome Quality Assessment
+Using variables like completeness, contamination, genome size, N50, etc.
+Useful R analyses:
+
+Quality filtering
+Remove genomes <50% complete, >10% contamination.
+Genome-quality distributions
+Histograms, density plots, boxplots.
+Outlier detection
+Identify bins with extreme metrics.
+
+Questions you can answer:
+
+Do certain sites produce higher-quality MAGs?
+Does sequencing depth differ by sampling date?
+Are completeness and contamination inversely correlated?
+
+✅ 3. Genome Feature Comparative Analysis
+If you have genome metrics (size, GC%, genes, tRNAs, etc.), you can explore:
+Options:
+
+Correlation analysis:
+
+cor(), corrplot::corrplot()
+
+Clustering of genomes based on features:
+
+Hierarchical clustering
+K-means clustering
+Heatmaps (pheatmap, ComplexHeatmap)
+
+Dimensionality reduction:
+
+PCA on genomic features
+
+Questions:
+
+Are high-GC genomes more common in certain soil conditions?
+Do genome sizes differ across moisture gradients?
+Are contamination and genome size correlated?
+
+✅ 4. Linking Genomic Features to Environment
+This is the most biologically interesting use of your data.
+Examples:
+
+Linear models / generalized models:
+lm(genome_size ~ pH + moisture)
+glm(presence ~ pH + moisture + temp, family = binomial)
+
+Mixed-effects models (lme4::lmer)
+
+If samples are nested within sites, or sites within regions.
+Random forests / machine learning
+Predict presence/absence or cluster membership from environmental variables.
+
+Questions:
+
+Does soil pH predict genome size?
+Are high-moisure soils associated with smaller or larger MAGs?
+Do genomes with high completeness cluster in specific environments?
+
+✅ 5. Temporal Trends (if you have sampling dates)
+With dates, you can analyze:
+
+Seasonality or succession
+Temporal clustering
+Time series analysis (if repeated sampling exists)
+
+Examples:
+
+Visualize genome-quality or abundance over time.
+Compare environmental changes with MAG changes.
+
+✅ 6. Diversity Metrics
+If multiple MAGs per sample exist, you can compute:
+
+Richness (# of MAGs per site)
+Shannon diversity
+Simpson diversity
+Using vegan::diversity().
+
+You can then test:
+
+Diversity vs pH
+Diversity vs moisture
+Diversity vs site
+
+✅ 7. Taxonomy-Based Patterns (if MAGs are annotated)
+If you have classifications (e.g., GTDB-TK outputs):
+
+Plot taxonomic composition across samples (ggplot2)
+Examine environmental niche preferences of taxa
+Test whether certain clades prefer certain pH/moisture regimes
+
+✅ 8. Visualizations
+Useful plots you can generate:
+Genome-level:
+
+Genome-size vs completeness scatterplots
+Contamination histograms
+PCA of genome features
+Heatmap of genome metrics
+
+Environment-level:
+
+Pairwise correlations of environmental variables
+pH/moisture distributions per site
+Geofaceted or facetted plots by site/date
+
+Combined analyses:
+
+Ordination plots colored by pH or moisture
+Bubble plots showing MAG presence vs environmental gradients
+
+If you want, I can:
+✔ recommend specific packages for each analysis
+✔ show full example R code to perform PCA, NMDS, environmental fitting, etc.
+✔ help you design a reproducible analysis workflow (import → tidy → analyze → plot)
+✔ examine your actual CSV to propose custom-tailored analyses
+Would you like:
+A) A step-by-step analysis plan
+B) Example R scripts for each analysis
+C) To upload the CSV so I can tell you exactly what you can do with your columns?
+
+## Exercise 3
+
+For exercise 3, I chose to investigate a question related to Environmental Correlations: Environmental correlation with genome size. This question were provided by ChatGPT, and I selected it because I thought it was particularly interesting and possible to answer with the data we are given.
+
+### Correlation Tests
+```{r}
+# pH vs genome size
+cor.test(NEON_soilMAGs_soilChem$soilInWaterpH,
+         NEON_soilMAGs_soilChem$total_number_of_bases,
+         method = "spearman")
+
+# Moisture vs genome size
+cor.test(NEON_soilMAGs_soilChem$soilMoisture,
+         NEON_soilMAGs_soilChem$total_number_of_bases,
+         method = "spearman")
+```
+This correlation test indicated p-values of 2.2e-16 for both tests, indicating that genome size is correlated to soil in water pH and may be correlated to soil moisture. In particular, the soil in water pH was associated with a weak negative correlation (rho = -0.259493), indicating that there exists some monotonic negative correlation between soil in water pH and genome size (i.e. a lower pH corresponds to a larger genome). While the p-value for soil moisture was similarly small/significant, the rho value (0.1670062) was close enough to 0 to be considered likely insignificant.
+
+```{r}
+# pH vs number of genes
+cor.test(NEON_soilMAGs_soilChem$soilInWaterpH,
+         NEON_soilMAGs_soilChem$gene_count,
+         method = "spearman")
+
+# Moisture vs number of genes
+cor.test(NEON_soilMAGs_soilChem$soilMoisture,
+         NEON_soilMAGs_soilChem$gene_count,
+         method = "spearman")
+```
+This correlation test showed the same small p-value, but the rho values for each were less significant for gene count than genome size. The soil in water pH had a rho value of -0.198953, which is on the border of indicating a weak negative correlation, but the rho value for soil moisture (0.1213332) was significantly smaller and shows no significant correlation.
+
+### Visualization
+```{r}
+ggplot(NEON_soilMAGs_soilChem, aes(x = soilInWaterpH, y = total_number_of_bases)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm") +
+    theme_bw()
+
+ggplot(NEON_soilMAGs_soilChem, aes(x = soilMoisture, y = total_number_of_bases)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm") +
+    theme_bw()
+
+ggplot(NEON_soilMAGs_soilChem, aes(x = soilInWaterpH, y = gene_count)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm") +
+    theme_bw()
+
+ggplot(NEON_soilMAGs_soilChem, aes(x = soilMoisture, y = gene_count)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm") +
+    theme_bw()
+```
+These graphs show the slight negative correlation between soil in water pH and genome size, as the best fit line is slightly negative (though there is a large variance). In contrast, the line for soil moisture is nearly flat, indicating no significant correlation. We see very little clear difference between genome size and number of genes as a metric for genome size among these graphs.
+
+From these experiments, we can conclude there is likely a very slight negative correlation between soil in water pH and genome size, potentially related to microbes in the soil needing a larger genome to better respond to stressful environments such as low soil in water pH.

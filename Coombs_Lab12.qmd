@@ -1,0 +1,246 @@
+---
+title: "Lab 12"
+author: "Jonathan Coombs"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc_float: true
+    embed-resources: true
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+```{r}
+.libPaths(c("/home/jdcoombs_umass_edu/R/x86_64-pc-linux-gnu-library/4.5", "/usr/local/lib/R/site-library", "/usr/local/lib/R/library"))
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(DT)
+library(viridis)
+```
+
+## Examples
+
+```{r}
+## This is the path for working on Unity
+soilChem <- readRDS("/work/pi_bio678_umass_edu/data_NEON/soilChem.rds")
+
+## This is the path for Jeff's personal computer
+# soilChem <- readRDS("../data/NEON_metadata/soilChem.rds")
+
+soilChem$sls_metagenomicsPooling[5,'genomicsSampleID']
+
+soilChem$sls_metagenomicsPooling[5,'collectDate']
+
+soilChem$sls_metagenomicsPooling$genomicsPooledIDList[5]
+
+# View(soilChem$sls_soilChemistry # No soil chemistry data for HARV
+soilChem$sls_soilMoisture |> 
+  filter(sampleID == "HARV_013-O-39-20230704") |> 
+  select(sampleID, soilMoisture)
+
+# split up the pooled list into new columns
+genomicSamples <- soilChem$sls_metagenomicsPooling |>
+  tidyr::separate(genomicsPooledIDList, into=c("first","second","third"),sep="\\|",fill="right") |>
+  dplyr::select(genomicsSampleID,first,second,third)
+
+head(genomicSamples)
+
+genSampleExample <- genomicSamples |> 
+  tidyr::pivot_longer(cols=c("first","second","third"),values_to = "sampleID") |>
+  dplyr::select(sampleID,genomicsSampleID) |>
+  drop_na()
+
+chemEx <- soilChem$sls_soilMoisture |>
+  dplyr::select(sampleID,soilMoisture)
+
+## now combine the tables 
+combinedTab <- left_join(genSampleExample,chemEx, by = "sampleID") |> drop_na()
+
+## Show the data table
+head(combinedTab)
+
+genome_groups_mean <- combinedTab %>%
+  group_by(genomicsSampleID) %>%
+  summarize_at(c("soilMoisture"), mean)
+
+head(genome_groups_mean)
+
+soilpH_Example <- soilChem$sls_soilpH %>%
+  dplyr::filter(sampleID %in% combinedTab$sampleID) %>%
+  dplyr::select(sampleID,soilInWaterpH,soilInCaClpH)
+
+# now join with the existing table
+combinedTab_pH <- left_join(combinedTab,soilpH_Example, by = "sampleID")
+
+# and the final
+head(combinedTab_pH)
+
+# Remember to install the respirometry package
+library(respirometry)
+
+genome_groups_pH <- combinedTab_pH %>%
+  group_by(genomicsSampleID) %>%
+  summarize_at(c("soilInWaterpH","soilInCaClpH"), mean_pH) 
+
+head(genome_groups_pH)
+
+genome_groups_all_mean <- combinedTab_pH %>%
+  group_by(genomicsSampleID) %>%
+  {left_join(
+    summarize_at(.,vars("soilMoisture"), mean),
+    summarize_at(.,vars("soilInWaterpH","soilInCaClpH"), mean_pH)
+  )}
+
+head(genome_groups_all_mean)
+```
+
+## Exercises
+
+1.
+```{r}
+coreCollectionSubset <- soilChem$sls_soilCoreCollection |>
+  select(sampleID, decimalLatitude, decimalLongitude, elevation, soilTemp)
+coreCollectionSubset
+```
+
+2.
+```{r}
+join_subset <- left_join(genSampleExample, coreCollectionSubset)
+join_subset
+```
+
+3.
+```{r}
+mean_subset <- join_subset |>
+  group_by(genomicsSampleID) |>
+  summarize(across(c("decimalLatitude", "decimalLongitude", "elevation", "soilTemp"), mean))
+mean_subset
+```
+
+4.
+```{r}
+mean_joined <- left_join(mean_subset, genome_groups_all_mean) |>
+  group_by(genomicsSampleID) |>
+  mutate(soilpH = mean_pH(c(soilInWaterpH, soilInCaClpH)))
+mean_joined
+```
+
+5.
+```{r}
+mean_col <- mean_joined |>
+  mutate(siteID = substr(genomicsSampleID, 1, 4))
+mean_col
+```
+
+6.
+```{r}
+ggplot(mean_col, aes(x=siteID, y=soilpH)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  ggtitle("Mean soilpH by Site")
+```
+
+7.
+```{r}
+mean_col |>
+  group_by(siteID) |>
+  summarize_at(c("soilTemp", "soilMoisture"), mean) |>
+  ggplot(aes(x=soilMoisture, y=soilTemp)) +
+  geom_point()
+```
+
+8.
+```{r}
+library(janitor)
+
+NEON_MAGs_prelim <- read_tsv("/work/pi_bio678_umass_edu/data_NEON/exported_img_bins_Gs0166454_NEON.tsv") |>
+
+  clean_names() |> 
+  
+  # Add a new column community corresponding to different communities names in the genome_name
+  mutate(community = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater sediment microbial communitie",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater biofilm microbial communities",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater microbial communities",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil microbial communities",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Create a column type that is either Freshwater or Soil
+  mutate(type = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Get rid of the communities strings
+  mutate_at("genome_name", str_replace, "Freshwater sediment microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater biofilm microbial communities from", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Soil microbial communities from ", "") |> 
+
+  # separate site from sample name 
+  separate(genome_name, c("site","sample_name"), " - ") |>   
+  
+  # Deal with these unknow fields in the sample name by creating a new column and removing them from the sample name
+  mutate(sample_unknown = case_when(
+    str_detect(sample_name, ".SS.") ~ "SS",
+    str_detect(sample_name, ".C0.") ~ "C0",
+    str_detect(sample_name, ".C1.") ~ "C1",
+    str_detect(sample_name, ".C2.") ~ "C2",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  mutate_at("sample_name", str_replace, ".SS", "") |> 
+  mutate_at("sample_name", str_replace, ".C0", "") |> 
+  mutate_at("sample_name", str_replace, ".C1", "") |> 
+  mutate_at("sample_name", str_replace, ".C2", "") |> 
+  
+
+  # Get rid of the the common strings at the end of sample names
+  mutate_at("sample_name", str_replace, "-GEN-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA2", "") |>  
+  mutate_at("sample_name", str_replace, ".DNA-DNA1", "") |>
+  mutate_at("sample_name", str_replace, "_v2", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 2\\)", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 3\\)", "") |>
+  
+# Separate out the taxonomy groups
+  separate(gtdb_taxonomy_lineage, c("domain", "phylum", "class", "order", "family", "genus"), "; ", remove = FALSE)
+
+NEON_MAGs_soil <- NEON_MAGs_prelim |>
+  filter(type == "Soil") |>
+  # separate the Sample Name into Site ID and plot info
+  separate(sample_name, c("site_ID","subplot.layer.date"), "_", remove = FALSE,) |> 
+  # some sample names have 3 fields while others have a fourth field for the quadrant. This code create a field for the quadrant when present and adds na for samples from combined cores.
+  extract(
+    subplot.layer.date,
+    into = c("subplot", "layer", "quadrant", "date"),
+    regex = "^([^-]+)-([^-]+)(?:-([^-]+))?-([^-]+)$",
+    remove = FALSE
+  ) |>
+  mutate(quadrant = na_if(quadrant, "")) |>
+  select(-subplot.layer.date)
+```
+
+```{r}
+df8 <- mean_joined |> mutate(sample_name = substr(genomicsSampleID, 1, nchar(genomicsSampleID) - 5))
+df8 <- full_join(df8, NEON_MAGs_soil, by="sample_name")
+df8
+```
+
+9.
+```{r}
+mag_table <- df8 |>
+  filter(soilpH < 4.0)
+mag_table
+```

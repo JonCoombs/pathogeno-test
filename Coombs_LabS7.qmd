@@ -1,0 +1,294 @@
+---
+title: "Lab S7"
+author: "Jonathan Coombs"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc_float: true
+    embed-resources: true
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(DT)
+library(viridis)
+library(janitor)
+library(plotly)
+library(respirometry)
+```
+
+## Import and Data Prep
+
+```{r}
+# Define neon_mags_soil
+
+NEON_MAGs_prelim <- read_tsv("/work/pi_bio678_umass_edu/data_NEON/exported_img_bins_Gs0166454_NEON.tsv") |>
+
+  clean_names() |> 
+  
+  # Add a new column community corresponding to different communities names in the genome_name
+  mutate(community = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater sediment microbial communitie",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater biofilm microbial communities",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater microbial communities",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil microbial communities",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Create a column type that is either Freshwater or Soil
+  mutate(type = case_when(
+    str_detect(genome_name, "Freshwater sediment microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater biofilm microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Freshwater microbial communities") ~ "Freshwater",
+    str_detect(genome_name, "Soil microbial communities") ~ "Soil",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  # Get rid of the communities strings
+  mutate_at("genome_name", str_replace, "Freshwater sediment microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater biofilm microbial communities from", "") |> 
+  mutate_at("genome_name", str_replace, "Freshwater microbial communities from ", "") |> 
+  mutate_at("genome_name", str_replace, "Soil microbial communities from ", "") |> 
+
+  # separate site from sample name 
+  separate(genome_name, c("site","sample_name"), " - ") |>   
+  
+  # Deal with these unknow fields in the sample name by creating a new column and removing them from the sample name
+  mutate(sample_unknown = case_when(
+    str_detect(sample_name, ".SS.") ~ "SS",
+    str_detect(sample_name, ".C0.") ~ "C0",
+    str_detect(sample_name, ".C1.") ~ "C1",
+    str_detect(sample_name, ".C2.") ~ "C2",
+    TRUE ~ NA_character_
+  )) |> 
+  
+  mutate_at("sample_name", str_replace, ".SS", "") |> 
+  mutate_at("sample_name", str_replace, ".C0", "") |> 
+  mutate_at("sample_name", str_replace, ".C1", "") |> 
+  mutate_at("sample_name", str_replace, ".C2", "") |> 
+  
+
+  # Get rid of the the common strings at the end of sample names
+  mutate_at("sample_name", str_replace, "-GEN-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA1", "") |>  
+  mutate_at("sample_name", str_replace, "-COMP-DNA2", "") |>  
+  mutate_at("sample_name", str_replace, ".DNA-DNA1", "") |>
+  mutate_at("sample_name", str_replace, "_v2", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 2\\)", "") |>
+  mutate_at("sample_name", str_replace, " \\(version 3\\)", "") |>
+  
+# Separate out the taxonomy groups
+  separate(gtdb_taxonomy_lineage, c("domain", "phylum", "class", "order", "family", "genus"), "; ", remove = FALSE)
+
+NEON_MAGs_soil <- NEON_MAGs_prelim |>
+  filter(type == "Soil") |>
+  # separate the Sample Name into Site ID and plot info
+  separate(sample_name, c("site_ID","subplot.layer.date"), "_", remove = FALSE,) |> 
+  # some sample names have 3 fields while others have a fourth field for the quadrant. This code create a field for the quadrant when present and adds na for samples from combined cores.
+  extract(
+    subplot.layer.date,
+    into = c("subplot", "layer", "quadrant", "date"),
+    regex = "^([^-]+)-([^-]+)(?:-([^-]+))?-([^-]+)$",
+    remove = FALSE
+  ) |>
+  mutate(quadrant = na_if(quadrant, "")) |>
+  select(-subplot.layer.date)
+
+# Define genome_groups_all_means
+
+soilChem <- readRDS("/work/pi_bio678_umass_edu/data_NEON/soilChem.rds")
+
+## This is the path for Jeff's personal computer
+# soilChem <- readRDS("../data/NEON_metadata/soilChem.rds")
+
+soilChem$sls_metagenomicsPooling[5,'genomicsSampleID']
+
+soilChem$sls_metagenomicsPooling[5,'collectDate']
+
+soilChem$sls_metagenomicsPooling$genomicsPooledIDList[5]
+
+# View(soilChem$sls_soilChemistry # No soil chemistry data for HARV
+soilChem$sls_soilMoisture |> 
+  filter(sampleID == "HARV_013-O-39-20230704") |> 
+  select(sampleID, soilMoisture)
+
+# split up the pooled list into new columns
+genomicSamples <- soilChem$sls_metagenomicsPooling |>
+  tidyr::separate(genomicsPooledIDList, into=c("first","second","third"),sep="\\|",fill="right") |>
+  dplyr::select(genomicsSampleID,first,second,third)
+
+genSampleExample <- genomicSamples |> 
+  tidyr::pivot_longer(cols=c("first","second","third"),values_to = "sampleID") |>
+  dplyr::select(sampleID,genomicsSampleID) |>
+  drop_na()
+
+chemEx <- soilChem$sls_soilMoisture |>
+  dplyr::select(sampleID,soilMoisture)
+
+## now combine the tables 
+combinedTab <- left_join(genSampleExample,chemEx, by = "sampleID") |> drop_na()
+
+soilpH_Example <- soilChem$sls_soilpH %>%
+  dplyr::filter(sampleID %in% combinedTab$sampleID) %>%
+  dplyr::select(sampleID,soilInWaterpH,soilInCaClpH)
+
+# now join with the existing table
+combinedTab_pH <- left_join(combinedTab,soilpH_Example, by = "sampleID")
+
+genome_groups_all_mean <- combinedTab_pH %>%
+  group_by(genomicsSampleID) %>%
+  {left_join(
+    summarize_at(.,vars("soilMoisture"), mean),
+    summarize_at(.,vars("soilInWaterpH","soilInCaClpH"), mean_pH)
+  )}
+```
+
+```{r}
+# Combine data frames, save
+
+tmp <- genome_groups_all_mean |> mutate(sample_name = substr(genomicsSampleID, 1, nchar(genomicsSampleID) - 5))
+
+NEON_soilMAGs_soilChem <- left_join(tmp, NEON_MAGs_soil)
+
+write.csv(NEON_soilMAGs_soilChem,file = "NEON_soilMAGs_soilChem.csv")
+```
+
+## Exercises
+
+For this lab, I chose to focus on co-occurance and network analysis, specifically microbial interaction networks.
+
+### ChatGPT Prompt:
+
+This is a CSV file of metagenome assembled genomes, including information about the site and date where the sample was taken (such as soil PH and moisture) as well as genomics information about the specific bin (such as contamination, completeness, and number of bases). I'd like to look for microbial interaction networks, specifically looking for co-occurance of certain microbes and types of microbes. Can you write R code to do this on the given data table?
+
+### Analysis Code
+
+```{r}
+# Abundance matrix construction
+
+# 2) Build abundance matrix (samples x genomes)
+library(dplyr); library(tidyr)
+
+# Ensure the expected columns exist
+stopifnot(all(c("sample_name","bin_id","average_coverage") %in% names(NEON_soilMAGs_soilChem)))
+
+abund_tbl <- NEON_soilMAGs_soilChem %>%
+  select(sample_name, bin_id, average_coverage) %>%
+  mutate(average_coverage = replace_na(average_coverage, 0)) %>%
+  group_by(sample_name, bin_id) %>%
+  summarise(average_coverage = sum(average_coverage), .groups = "drop") %>%
+  pivot_wider(names_from = bin_id, values_from = average_coverage, values_fill = 0)
+
+sample_ids <- abund_tbl$sample_name
+abund_mat <- abund_tbl %>% select(-sample_name) %>% as.data.frame()
+rownames(abund_mat) <- sample_ids
+abund_mat <- as.matrix(abund_mat)
+
+cat("Abundance matrix dimensions (samples x genomes):", dim(abund_mat), "\n")
+
+# 4) CLR transform
+library(matrixStats)
+
+abund_for_clr <- abund_mat  # use abund_filt (or abund_mat if you skipped filtering)
+pseudocount <- 1e-6
+
+# Convert to relative abundances (per sample)
+row_sums <- rowSums(abund_for_clr)
+# avoid division by zero; if any row sum is 0, replace with 1 to keep zeros
+row_sums[row_sums == 0] <- 1
+rel_abund <- sweep(abund_for_clr, 1, row_sums, FUN = "/")
+
+# CLR: log(x) - mean(log(x)) per sample
+rel_abund_pc <- rel_abund + pseudocount
+log_mat <- log(rel_abund_pc)
+clr_mat <- sweep(log_mat, 1, rowMeans(log_mat), FUN = "-")
+
+# sanity
+cat("CLR matrix dims:", dim(clr_mat), "\n")
+```
+
+```{r}
+# Spearman analysis
+
+# 5) Spearman network
+library(Hmisc)
+library(igraph)
+library(ggraph)
+library(ggplot2)
+
+# compute Spearman correlation and p-values on CLR-transformed features
+rc <- rcorr(as.matrix(clr_mat), type = "spearman")
+R <- rc$r
+P <- rc$P
+
+# build edge list from upper triangle, apply thresholds
+cor_cutoff <- 0.3
+p_adj_cutoff <- 0.1
+
+pairs <- which(upper.tri(R), arr.ind = TRUE)
+edges <- tibble::tibble(
+  from = colnames(R)[pairs[,1]],
+  to   = colnames(R)[pairs[,2]],
+  cor  = R[upper.tri(R)],
+  pval = P[upper.tri(P)]
+) %>%
+  mutate(p_adj = p.adjust(pval, method = "BH")) %>%
+  filter(!is.na(cor)) %>%
+  filter(abs(cor) >= cor_cutoff, p_adj <= p_adj_cutoff)
+
+cat("Spearman edges passing thresholds:", nrow(edges), "\n")
+readr::write_csv(edges, "spearman_edge_list.csv")
+
+# Build igraph from edges (or empty graph if no edges)
+if(nrow(edges) > 0){
+  g_spear <- graph_from_data_frame(edges, directed = FALSE, vertices = data.frame(name = colnames(clr_mat)))
+} else {
+  g_spear <- graph.empty(n = ncol(clr_mat))
+  V(g_spear)$name <- colnames(clr_mat)
+}
+
+# Annotate node attributes (prevalence, mean relative abundance)
+node_prev <- colMeans(abund_for_clr > 0)
+node_mean_rel <- colMeans(rel_abund)
+V(g_spear)$prevalence <- node_prev[V(g_spear)$name]
+V(g_spear)$mean_rel_abund <- node_mean_rel[V(g_spear)$name]
+
+# community detection (if edges exist)
+if(ecount(g_spear) > 0){
+  comm <- cluster_louvain(g_spear)
+  V(g_spear)$community <- membership(comm)
+} else {
+  V(g_spear)$community <- NA
+}
+
+# Save graph and node table
+readr::write_csv(tibble::tibble(name = V(g_spear)$name,
+                               prevalence = V(g_spear)$prevalence,
+                               mean_rel_abund = V(g_spear)$mean_rel_abund,
+                               community = V(g_spear)$community),
+                 "spearman_nodes.csv")
+
+igraph::write_graph(g_spear, "spearman_network.graphml", format = "graphml")
+
+# Plot (if edges exist)
+if(ecount(g_spear) > 0){
+  p_net <- ggraph(g_spear, layout = "fr") +
+    geom_edge_link(aes(edge_width = abs(cor)), data = edges, alpha = 0.7) +
+    geom_node_point(aes(size = mean_rel_abund*100, color = factor(community))) +
+    geom_node_text(aes(label = name), repel = TRUE, size = 2) +
+    theme_void() +
+    ggtitle("Spearman co-occurrence network (CLR-transformed)")
+  ggsave("spearman_network.png", p_net, width = 10, height = 8)
+  print(p_net)
+} else {
+  message("No edges found for Spearman network with current thresholds.")
+}
+```
+
+Based on the code, there were no microbes with a strong enough correlation to show up on the Spearman analysis. I suspect that the threshold was just set too high, or there are some other issues with the analysis or matrix creation, as there must be some microbes with co-occurance interactions, but this analysis has not shown any of these interactions.

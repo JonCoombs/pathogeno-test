@@ -1,0 +1,416 @@
+---
+title: "Lab 10"
+author: "Jonathan Coombs"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc_float: true
+    embed-resources: true
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+## Lab Examples
+
+```{r}
+library(tidyverse)
+library(babynames)
+```
+
+```{r}
+grepl("cat", c("cat", "dog", "catalog"))
+gsub("dog", "cat", "dog and dog")
+text <- c("apple", "banana", "cherry", "date")
+grep("a", text, value = TRUE)  # Matches strings containing 'a'
+grep("^a", text, value = TRUE)  # Matches strings starting with 'a'
+grep("a$", text, value = TRUE)  # Matches strings ending with 'a'
+str_detect(c("apple", "banana", "cherry"), "^a")
+str_replace("cat and dog", "dog", "mouse")
+str_replace_all("cat and dog and dog", "dog", "mouse")
+str_extract("My email is test@example.com", "[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}")
+str_match("Name: John", "Name: (\\w+)")
+str_split("apple,banana,cherry", ",")
+```
+
+## 15.3
+
+### Examples
+
+```{r}
+str_view(fruit, "berry")
+str_view(c("a", "ab", "ae", "bd", "ea", "eab"), "a.")
+str_view(fruit, "a...e")
+# ab? matches an "a", optionally followed by a "b".
+str_view(c("a", "ab", "abb"), "ab?")
+# ab+ matches an "a", followed by at least one "b".
+str_view(c("a", "ab", "abb"), "ab+")
+# ab* matches an "a", followed by any number of "b"s.
+str_view(c("a", "ab", "abb"), "ab*")
+str_view(words, "[aeiou]x[aeiou]")
+str_view(words, "[^aeiou]y[^aeiou]")
+str_view(fruit, "apple|melon|nut")
+str_view(fruit, "aa|ee|ii|oo|uu")
+str_detect(c("a", "b", "c"), "[aeiou]")
+babynames |> 
+  filter(str_detect(name, "x")) |> 
+  count(name, wt = n, sort = TRUE)
+babynames |> 
+  group_by(year) |> 
+  summarize(prop_x = mean(str_detect(name, "x"))) |> 
+  ggplot(aes(x = year, y = prop_x)) + 
+  geom_line()
+x <- c("apple", "banana", "pear")
+str_count(x, "p")
+str_count("abababa", "aba")
+str_view("abababa", "aba")
+babynames |> 
+  count(name) |> 
+  mutate(
+    vowels = str_count(name, "[aeiou]"),
+    consonants = str_count(name, "[^aeiou]")
+  )
+babynames |> 
+  count(name) |> 
+  mutate(
+    name = str_to_lower(name),
+    vowels = str_count(name, "[aeiou]"),
+    consonants = str_count(name, "[^aeiou]")
+  )
+x <- c("apple", "pear", "banana")
+str_replace_all(x, "[aeiou]", "-")
+x <- c("apple", "pear", "banana")
+str_remove_all(x, "[aeiou]")
+df <- tribble(
+  ~str,
+  "<Sheryl>-F_34",
+  "<Kisha>-F_45", 
+  "<Brandon>-N_33",
+  "<Sharon>-F_38", 
+  "<Penny>-F_58",
+  "<Justin>-M_41", 
+  "<Patricia>-F_84", 
+)
+df |> 
+  separate_wider_regex(
+    str,
+    patterns = c(
+      "<", 
+      name = "[A-Za-z]+", 
+      ">-", 
+      gender = ".",
+      "_",
+      age = "[0-9]+"
+    )
+  )
+```
+
+### Exercises
+
+1.
+```{r}
+vowel_cons <- babynames |> 
+  count(name) |> 
+  mutate(
+    name = str_to_lower(name),
+    vowels = str_count(name, "[aeiou]"),
+    consonants = str_count(name, "[^aeiou]"),
+    vowel_prop = vowels / (vowels + consonants)
+  )
+vowel_cons[order(vowel_cons$vowels, decreasing=TRUE),]
+vowel_cons[order(vowel_cons$vowel_prop, decreasing=TRUE),]
+```
+The two names with the greatest number of vowels are "Mariodelrosaria" and "Mariaguadalupe", both with 8 vowels. There are 8 names that are only vowels (i.e. proportion of vowels is 1), which are "Ai", "Aia", "Aoi", "Ea", "Eua", "Ia", "Ii", and "Io".
+
+2.
+```{r}
+string <- "a/b/c/d/e"
+string <- gsub("/", "\\\\", string)
+str_view(string)
+string <- gsub("\\\\", "/", string)
+str_view(string)
+```
+R codes backslash characters as two backslashes (in a string, "//" represents a single backslash character since "/" is an escape character), so while we can transform these strings back and forth we are unable to clearly print a single backslash (and if we wanted to display single backslashes, those would be attached to escape characters instead of being part of the string itself).
+
+3.
+```{r}
+my_str_to_lower <- function(str) {
+  return(str |>
+           str_replace_all("A", "a") |>
+           str_replace_all("B", "b") |>
+           str_replace_all("C", "c") |>
+           str_replace_all("D", "d") |>
+           str_replace_all("E", "e") |>
+           str_replace_all("F", "f") |>
+           str_replace_all("G", "g") |>
+           str_replace_all("H", "h") |>
+           str_replace_all("I", "i") |>
+           str_replace_all("J", "j") |>
+           str_replace_all("K", "k") |>
+           str_replace_all("L", "l") |>
+           str_replace_all("M", "m") |>
+           str_replace_all("N", "n") |>
+           str_replace_all("O", "o") |>
+           str_replace_all("P", "p") |>
+           str_replace_all("Q", "q") |>
+           str_replace_all("R", "r") |>
+           str_replace_all("S", "s") |>
+           str_replace_all("T", "t") |>
+           str_replace_all("U", "u") |>
+           str_replace_all("V", "v") |>
+           str_replace_all("W", "w") |>
+           str_replace_all("X", "x") |>
+           str_replace_all("Y", "y") |>
+           str_replace_all("Z", "z")
+        )
+}
+test_str = "HelLo WorLD!"
+my_str_to_lower(test_str)
+```
+
+4.
+```{r}
+reg_ex <- "^(?:\\+1[ -]?)?(?:\\(\\d{3}\\)|\\d{3})[ .-]?\\d{3}[ .-]?\\d{4}$"
+phone_nums <- c("555-555-5555", "(555)-555-5555", "+1 (555)-555-5555", "555 555 5555")
+str_view(phone_nums, reg_ex)
+```
+
+## 15.4
+
+### Examples
+
+```{r}
+# To create the regular expression \., we need to use \\.
+dot <- "\\."
+
+# But the expression itself only contains one \
+str_view(dot)
+
+# And this tells R to look for an explicit .
+str_view(c("abc", "a.c", "bef"), "a\\.c")
+
+x <- "a\\b"
+str_view(x)
+str_view(x, "\\\\")
+str_view(x, r"{\\}")
+str_view(c("abc", "a.c", "a*c", "a c"), "a[.]c")
+str_view(c("abc", "a.c", "a*c", "a c"), ".[*]c")
+str_view(fruit, "^a")
+str_view(fruit, "a$")
+str_view(fruit, "apple")
+str_view(fruit, "^apple$")
+x <- c("summary(x)", "summarize(df)", "rowsum(x)", "sum(x)")
+str_view(x, "sum")
+str_view(x, "\\bsum\\b")
+str_view("abc", c("$", "^", "\\b"))
+str_replace_all("abc", c("$", "^", "\\b"), "--")
+x <- "abcd ABCD 12345 -!@#%."
+str_view(x, "[abc]+")
+str_view(x, "[a-z]+")
+str_view(x, "[^a-z0-9]+")
+
+# You need an escape to match characters that are otherwise
+# special inside of []
+str_view("a-b-c", "[a-c]")
+str_view("a-b-c", "[a\\-c]")
+x <- "abcd ABCD 12345 -!@#%."
+str_view(x, "\\d+")
+str_view(x, "\\D+")
+str_view(x, "\\s+")
+str_view(x, "\\S+")
+str_view(x, "\\w+")
+str_view(x, "\\W+")
+
+str_view(fruit, "(..)\\1")
+str_view(words, "^(..).*\\1$")
+sentences |> 
+  str_replace("(\\w+) (\\w+) (\\w+)", "\\1 \\3 \\2") |> 
+  str_view()
+sentences |> 
+  str_match("the (\\w+) (\\w+)") |> 
+  head()
+sentences |> 
+  str_match("the (\\w+) (\\w+)") |> 
+  as_tibble(.name_repair = "minimal") |> 
+  set_names("match", "word1", "word2")
+x <- c("a gray cat", "a grey dog")
+str_match(x, "gr(e|a)y")
+str_match(x, "gr(?:e|a)y")
+```
+
+### Exercises
+
+1. I would match the literal string "'\ with the regex "\"['][\\\\]". (If this was intended to be the literal string '\ and there should have been an enclosing quote, this would instead be the regex "['][\\\\]"). I would match the literal string "$^$" with the regex "//$]//^//$".
+
+2. The first one creates an escape character on the quote, so it will look for a literal " rather than a literal \. The second one looks for a single backslash in the string, but a backslash is coded as an escaped backslash in the string viewer (i.e. \\), so it will not find any backslashes in the string. The third one creates a backslash character, but also tries to escape the quote after the third backslash, which will look for a \" character in the string.
+
+```{r}
+str_view("abab", "(^([aeiou][bcdfghjklmnpqrstvwxyz])+$)")
+```
+
+3. a. "^y" b. "^[^y]" c. "x$" d. "^...$" e. "^.{7,}$" f. "[aeiou][bcdfghjklmnpqrstvwxyz]"
+f. "[aeiou][bcdfghjklmnpqrstvwxyz][aeiou][bcdfghjklmnpqrstvwxyz]" g. "(^([aeiou][bcdfghjklmnpqrstvwxyz])+$)"
+
+4.
+```{r}
+r1 <- "a(ero|ir)plane"
+r2 <- "alumini?um"
+r3 <- "analog(?:ue)?"
+r4 <- "a(rse|ss)"
+r5 <- "cent(er|re)"
+r6 <- "defen[sc]e"
+r7 <- "do(?:ugh)?nut"
+r8 <- "gr[ea]y"
+r9 <- "modell?ing"
+r10 <- "s[ck]eptic"
+r11 <- "summari[zs]e"
+```
+
+5.
+```{r}
+swapped <- words |>
+  str_replace("^(.)(.*)(.)$", "\\3\\2\\1")
+swapped[swapped %in% words]
+```
+There are still 45 words, most of which have the same first and last letter (e.g. "area"), some of which had equivalent words with just the first and last letter swapped (e.g. "read" and "dear"), and the word "a", which only has 1 letter so does not change.
+
+```{r}
+str_view("abbbaa", "(.)\\1\\1")
+```
+
+6. a. This matches any string.
+b. This matches any string that includes opening and enclosing curly braces ({ and }) with at least one character between them.
+c. Assuming this should be the regex "\\d{4}-\\d{2}-\\d{2}", this encodes dates in the format YYYY-MM-DD or YYYY-DD-MM, though technically it matches any string that has 4 digits followed by a dash, then 2 digits, then another dash, then 2 more digits.
+d. This matches any string with 4 consecutive backslash characters.
+e. Assuming this should be "\\..\\..\\..", this matches any string with the literal pattern".a.a.a", where "a" is any character (i.e. 3 period-separated characters).
+f. Assuming this should be "(.)\\1\\1", this matches any character repeated 3 times in a row.
+g. This matches any two characters that are repeated and adjacent, i.e. the abab pattern.
+
+7. #![Screenshot of completed puzzles](regex.png)
+
+## 15.5
+
+```{r}
+bananas <- c("banana", "Banana", "BANANA")
+str_view(bananas, "banana")
+str_view(bananas, regex("banana", ignore_case = TRUE))
+x <- "Line 1\nLine 2\nLine 3"
+str_view(x, ".Line")
+str_view(x, regex(".Line", dotall = TRUE))
+x <- "Line 1\nLine 2\nLine 3"
+str_view(x, "^Line")
+str_view(x, regex("^Line", multiline = TRUE))
+phone <- regex(
+  r"(
+    \(?     # optional opening parens
+    (\d{3}) # area code
+    [)\-]?  # optional closing parens or dash
+    \ ?     # optional space
+    (\d{3}) # another three numbers
+    [\ -]?  # optional space or dash
+    (\d{4}) # four more numbers
+  )", 
+  comments = TRUE
+)
+
+str_extract(c("514-791-8141", "(123) 456 7890", "123456"), phone)
+str_view(c("", "a", "."), fixed("."))
+str_view("x X", "X")
+str_view("x X", fixed("X", ignore_case = TRUE))
+str_view("i İ ı I", fixed("İ", ignore_case = TRUE))
+str_view("i İ ı I", coll("İ", ignore_case = TRUE, locale = "tr"))
+```
+
+## 15.6
+
+### Examples
+
+```{r}
+str_view(sentences, "^The")
+str_view(sentences, "^The\\b")
+str_view(sentences, "^She|He|It|They\\b")
+str_view(sentences, "^(She|He|It|They)\\b")
+pos <- c("He is a boy", "She had a good time")
+neg <- c("Shells come from the sea", "Hadley said 'It's a great day'")
+
+pattern <- "^(She|He|It|They)\\b"
+str_detect(pos, pattern)
+str_detect(neg, pattern)
+str_view(words, "^[^aeiou]+$")
+str_view(words[!str_detect(words, "[aeiou]")])
+str_view(words, "a.*b|b.*a")
+words[str_detect(words, "a") & str_detect(words, "b")]
+words[str_detect(words, "a.*e.*i.*o.*u")]
+words[str_detect(words, "u.*o.*i.*e.*a")]
+words[
+  str_detect(words, "a") &
+  str_detect(words, "e") &
+  str_detect(words, "i") &
+  str_detect(words, "o") &
+  str_detect(words, "u")
+]
+str_view(sentences, "\\b(red|green|blue)\\b")
+rgb <- c("red", "green", "blue")
+str_c("\\b(", str_flatten(rgb, "|"), ")\\b")
+str_view(colors())
+cols <- colors()
+cols <- cols[!str_detect(cols, "\\d")]
+str_view(cols)
+pattern <- str_c("\\b(", str_flatten(cols, "|"), ")\\b")
+str_view(sentences, pattern)
+```
+
+### Exercises
+
+1.
+```{r}
+str_view(words, "^x|x$")
+unique(c(words[str_detect(words, "^x")], words[str_detect(words, "x$")]))
+
+str_view(words, "^[aeiou].*[bcdfghjklmnpqrstvwxyz]$")
+intersect(words[str_detect(words, "^[aeiou]")], words[str_detect(words, "[bcdfghjklmnpqrstvwxyz]$")])
+
+# There are no words that contain one of each different vowel.
+str_view(words, "(?=.*a)(?=.*e)(?=.*i)(?=.*o)(?=.*u)")
+words[
+  str_detect(words, "a") &
+  str_detect(words, "e") &
+  str_detect(words, "i") &
+  str_detect(words, "o") &
+  str_detect(words, "u")
+]
+```
+
+2.
+```{r}
+str_view(words, "(?<!c)ie") # Rule is true for non-C
+str_view(words, "(?<!c)ei") # Rule is false for non-C
+```
+
+3.
+```{r}
+color_names <- colors()
+# Only considering modifiers light, dark, and medium, since these are the modifiers referenced in the question.
+modifier_colors <- str_subset(color_names, "^(light|dark|medium)")
+base_colors <- str_remove(modifier_colors, "^(light|dark|medium)")
+base_colors
+```
+
+4.
+```{r}
+dataset_names <- data(package = "datasets")$results[, "Item"]
+dataset_names_clean <- str_remove(dataset_names, " \\(.*\\)$")
+dataset_escaped <- str_replace_all(dataset_names_clean, "([\\^$.|?*+(){}\\[\\]])", "\\\\\\1")
+dataset_regex <- paste0("^(", paste(dataset_escaped, collapse = "|"), ")$")
+
+dataset_regex
+```
+
+## 15.7
+
+```{r}
+apropos("replace")
+head(list.files(pattern = "\\.Rmd$"))
+```

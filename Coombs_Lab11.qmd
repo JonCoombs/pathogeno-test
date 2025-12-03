@@ -1,0 +1,260 @@
+---
+title: "Lab 11"
+author: "Jonathan Coombs"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc_float: true
+    embed-resources: true
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+## Lab Examples
+
+```{r}
+library(tidyverse)
+library(nycflights13)
+```
+
+```{r}
+species <- tibble(id = c(1, 2, 3),
+              name = c("Species1", "Species2", "Species3"))
+
+abundance <- tibble(id = c(2, 3, 4),
+              abundance = c(85, 90, 95))
+left_join(species, abundance, by = "id")
+inner_join(species, abundance, by = "id")
+full_join(species, abundance, by = "id")
+```
+
+## 19.2
+
+```{r}
+airlines
+airports
+planes
+weather
+planes |> 
+  count(tailnum) |> 
+  filter(n > 1)
+weather |> 
+  count(time_hour, origin) |> 
+  filter(n > 1)
+planes |> 
+  filter(is.na(tailnum))
+weather |> 
+  filter(is.na(time_hour) | is.na(origin))
+flights |> 
+  count(time_hour, carrier, flight) |> 
+  filter(n > 1)
+airports |>
+  count(alt, lat) |> 
+  filter(n > 1)
+flights2 <- flights |> 
+  mutate(id = row_number(), .before = 1)
+flights2
+```
+
+## 19.3
+
+### Examples
+
+```{r}
+flights2 <- flights |> 
+  select(year, time_hour, origin, dest, tailnum, carrier)
+flights2
+flights2 |>
+  left_join(airlines)
+flights2 |> 
+  left_join(weather |> select(origin, time_hour, temp, wind_speed))
+flights2 |> 
+  left_join(planes |> select(tailnum, type, engines, seats))
+flights2 |> 
+  filter(tailnum == "N3ALAA") |> 
+  left_join(planes |> select(tailnum, type, engines, seats))
+flights2 |> 
+  left_join(planes)
+flights2 |> 
+  left_join(planes, join_by(tailnum))
+flights2 |> 
+  left_join(airports, join_by(dest == faa))
+flights2 |> 
+  left_join(airports, join_by(origin == faa))
+airports |> 
+  semi_join(flights2, join_by(faa == origin))
+airports |> 
+  semi_join(flights2, join_by(faa == dest))
+flights2 |> 
+  anti_join(airports, join_by(dest == faa)) |> 
+  distinct(dest)
+flights2 |>
+  anti_join(planes, join_by(tailnum)) |> 
+  distinct(tailnum)
+```
+
+### Exercises
+
+1.
+```{r}
+flights |>
+  group_by(month, day) |>
+  summarize(avr_delay = mean(arr_delay, na.rm = TRUE)) |>
+  mutate(paired_delay = avr_delay + lead(avr_delay)) |>
+  arrange(desc(paired_delay)) |>
+  head(n=10)
+weather |>
+  group_by(month, day) |>
+  summarize(avr_wind_speed = mean(wind_speed, na.rm = TRUE),
+            avr_precip = mean(precip, na.rm = TRUE),
+            avr_visib = mean(visib, na.rm = TRUE)) |>
+  mutate(paired_wind_speed = avr_wind_speed + lead(avr_wind_speed),
+         paired_precip = avr_precip + lead(avr_precip),
+         paired_visib = avr_visib + lead(avr_visib)) |>
+  arrange(desc(avr_wind_speed))
+```
+In general, higher wind speed seems to overlap with high-delay pairs of days.
+
+2.
+```{r}
+top_dest <- flights2 |>
+  count(dest, sort = TRUE) |>
+  head(10)
+flights2 |>
+  semi_join(top_dest, by = "dest")
+```
+
+3. No, there are flights that do not have corresponding weather data.
+```{r}
+flights |>
+  left_join(weather, by=c("origin", "year", "month", "day", "hour")) |>
+  filter(is.na(temp) & is.na(precip))
+```
+
+4. Most of the tail_nums with no corresponding record in planes depart from LGA.
+```{r}
+flights |>
+  group_by(tailnum) |>
+  anti_join(planes, by = "tailnum") |>
+  filter(!is.na(tailnum))
+```
+
+5.
+```{r}
+flights2 |>
+  select(tailnum, carrier) |>
+  left_join(planes, by = "tailnum") |>
+  group_by(tailnum) |>
+  mutate(carriers = paste(sort(unique(carrier)), collapse = ",")) |>
+  arrange(tailnum)
+```
+Most planes are only flown by one airline, which supports the implicit relationship between plane and airline. There are a few exceptions, notably that some planes are shared between 9E and EV.
+
+6. It's easier to rename the columns after the join, as we need to join these columns for both origin and destination.
+```{r}
+flights |>
+  left_join(airports |> select(faa, lat, lon), by = c("origin" = "faa")) |>
+  rename(origin_lat = lat, origin_lon = lon) |>
+  left_join(airports |> select(faa, lat, lon), by = c("dest" = "faa")) |>
+  rename(dest_lat = lat, dest_lon = lon)
+```
+
+7.
+```{r}
+flights |>
+  group_by(dest) |>
+  summarize(avg_delay = mean(arr_delay, na.rm = TRUE)) |>
+  left_join(airports, by = c("dest" = "faa")) |>
+  ggplot(aes(x = lon, y = lat, color = avg_delay)) +
+    borders("state") +
+    geom_point() +
+    coord_quickmap()
+```
+
+8.
+```{r}
+flights |>
+  filter(year == 2013 & month == 6 & day == 13) |>
+  group_by(dest) |>
+  summarize(avg_delay = mean(arr_delay, na.rm = TRUE)) |>
+  left_join(airports, by = c("dest" = "faa")) |>
+  ggplot(aes(x = lon, y = lat, color = avg_delay)) +
+    borders("state") +
+    geom_point() +
+    coord_quickmap()
+```
+There were far greater delays overall on June 13th, 2013, especially towards the east and in the Midwest. This is supported by the weather, which had severe wind and thunderstorms that moved across the Midwest and eastern US.
+
+## 19.4
+
+```{r}
+x <- tribble(
+  ~key, ~val_x,
+     1, "x1",
+     2, "x2",
+     3, "x3"
+)
+y <- tribble(
+  ~key, ~val_y,
+     1, "y1",
+     2, "y2",
+     4, "y3"
+)
+df1 <- tibble(key = c(1, 2, 2), val_x = c("x1", "x2", "x3"))
+df2 <- tibble(key = c(1, 2, 2), val_y = c("y1", "y2", "y3"))
+df1 |> 
+  inner_join(df2, join_by(key))
+```
+
+## 19.5
+
+### Examples
+
+```{r}
+x |> inner_join(y, join_by(key == key), keep = TRUE)
+df <- tibble(name = c("John", "Simon", "Tracy", "Max"))
+df |> cross_join(df)
+df <- tibble(id = 1:4, name = c("John", "Simon", "Tracy", "Max"))
+df |> inner_join(df, join_by(id < id))
+parties <- tibble(
+  q = 1:4,
+  party = ymd(c("2022-01-10", "2022-04-04", "2022-07-11", "2022-10-03"))
+)
+set.seed(123)
+employees <- tibble(
+  name = sample(babynames::babynames$name, 100),
+  birthday = ymd("2022-01-01") + (sample(365, 100, replace = TRUE) - 1)
+)
+employees
+employees |> 
+  left_join(parties, join_by(closest(birthday >= party)))
+employees |> 
+  anti_join(parties, join_by(closest(birthday >= party)))
+parties <- tibble(
+  q = 1:4,
+  party = ymd(c("2022-01-10", "2022-04-04", "2022-07-11", "2022-10-03")),
+  start = ymd(c("2022-01-01", "2022-04-04", "2022-07-11", "2022-10-03")),
+  end = ymd(c("2022-04-03", "2022-07-11", "2022-10-02", "2022-12-31"))
+)
+parties
+parties |> 
+  inner_join(parties, join_by(overlaps(start, end, start, end), q < q)) |> 
+  select(start.x, end.x, start.y, end.y)
+parties <- tibble(
+  q = 1:4,
+  party = ymd(c("2022-01-10", "2022-04-04", "2022-07-11", "2022-10-03")),
+  start = ymd(c("2022-01-01", "2022-04-04", "2022-07-11", "2022-10-03")),
+  end = ymd(c("2022-04-03", "2022-07-10", "2022-10-02", "2022-12-31"))
+)
+employees |> 
+  inner_join(parties, join_by(between(birthday, start, end)), unmatched = "error")
+```
+
+### Exercises
+
+1. In the first equi join, the keys are compressed into a single column containing the shared key between x and y, while in the second, they are split and listed in two separate columns. This is a result of the second equi join specifying keep=TRUE, as this variable keeps all keys from both data tables when true and compresses them into one column of keys by default.
+
+2. q < q is specified to ensure that we do not compare the same row to itself (i.e. check for an overlap between the sample party period and itself). This is necessary, as otherwise each party period would be found to overlap with itself.
